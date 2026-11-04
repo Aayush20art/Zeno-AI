@@ -1,20 +1,23 @@
 import streamlit as st
 import uuid
 import time
+import os
+from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import StateGraph, MessagesState
 from langchain_core.messages import HumanMessage, AIMessage
 
 # ── ENV ───────────────────────────────────────────────────────────────────────
-
-from dotenv import load_dotenv
-import os
-
 load_dotenv(dotenv_path=".env", override=True)
 
+# Safely load the API key from either the environment or Streamlit secrets
 api_key = os.getenv("GROQ_API_KEY")
-api_key = st.secrets.get("GROQ_API_KEY", None)
+if not api_key:
+    try:
+        api_key = st.secrets.get("GROQ_API_KEY")
+    except Exception:
+        pass
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -22,7 +25,7 @@ st.set_page_config(
     page_icon="❄️",
 )
 
-# ── CSS (exact original colors + animations) ──────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] {
@@ -112,11 +115,15 @@ st.markdown("""
 
 
 # ── LLM + GRAPH (cached) ──────────────────────────────────────────────────────
-if st.button("🔄 Reload App"):
-    st.cache_resource.clear()
-    st.rerun()
-def get_graph(api_key: str, model_name: str):
-    llm = ChatGroq(groq_api_key=api_key, model_name=model_name)
+with st.sidebar:
+    if st.button("🔄 Reload App"):
+        st.cache_resource.clear()
+        st.rerun()
+
+# IMPORTANT: Added @st.cache_resource so InMemorySaver persists across Streamlit reruns
+@st.cache_resource
+def get_graph(_api_key: str, model_name: str):
+    llm = ChatGroq(api_key=_api_key, model_name=model_name)
 
     def chatbot_node(state: MessagesState):
         return {"messages": [llm.invoke(state["messages"])]}
@@ -139,12 +146,9 @@ if "messages" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ Controls")
 
-    active_key = api_key
-
     model_choice = st.selectbox("Model", [
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "mixtral-8x7b-32768",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b"
     ])
 
     if st.button("🆕 New Chat"):
@@ -175,8 +179,8 @@ for msg in st.session_state.messages:
 
 
 # ── INPUT ─────────────────────────────────────────────────────────────────────
-if not active_key:
-    st.info("Enter your GROQ API key in the sidebar to start chatting.", icon="🔑")
+if not api_key:
+    st.info("Enter your GROQ API key in your `.env` or `secrets.toml` to start chatting.", icon="🔑")
 else:
     user_input = st.chat_input("Type your message...")
 
@@ -196,7 +200,7 @@ else:
         """, unsafe_allow_html=True)
 
         # LLM call
-        app_graph = get_graph(active_key, model_choice)
+        app_graph = get_graph(api_key, model_choice)
         config    = {"configurable": {"thread_id": st.session_state.thread_id}}
 
         try:
